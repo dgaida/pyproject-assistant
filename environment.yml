@@ -1,0 +1,13 @@
+name: project-assistant
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pathspec
+  - pip
+  - pip:
+      - gradio
+      - groq
+      - faiss-cpu
+      - python-dotenv
+      - rich

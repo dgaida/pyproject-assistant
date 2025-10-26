@@ -1,0 +1,8 @@
+gradio>=3.30
+python-dotenv
+requests
+faiss-cpu
+numpy
+astor
+rich
+# optional: install a persistent vector DB instead of FAISS if desired
