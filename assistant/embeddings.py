@@ -30,17 +30,18 @@ class FaissStore:
         self.dim = dim
         self.index = None
         self.id_map = {}
-        if MAP_FILE.exists():
+        if MAP_FILE.exists() and INDEX_FILE.exists():
             try:
                 self.id_map = json.loads(MAP_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                self.id_map = {}
-        if INDEX_FILE.exists():
-            try:
                 self.index = faiss.read_index(str(INDEX_FILE))
                 self.dim = self.index.d
-            except Exception:
+                print(f"[FaissStore] ✅ Index ({self.index.ntotal} Vektoren) und Map ({len(self.id_map)} Einträge) geladen.")
+            except Exception as e:
+                print(f"[FaissStore] ⚠️ Fehler beim Laden des Index, starte neu: {e}")
                 self.index = None
+                self.id_map = {}
+        else:
+            print("[FaissStore] ℹ️ Kein Index/Map gefunden, starte neu.")
 
     def _init_index(self, dim: int) -> None:
         """Initialisiert einen neuen FAISS-Index mit gegebener Dimensionalität.
@@ -51,7 +52,23 @@ class FaissStore:
         self.dim = dim
         self.index = faiss.IndexFlatL2(dim)
 
-    def add(self, vector: list[float], filepath: str) -> None:
+    def clear(self) -> None:
+        """Löscht den Index und das Mapping (Datei und Speicher)."""
+        self.index = None
+        self.id_map = {}
+        if INDEX_FILE.exists():
+            try:
+                INDEX_FILE.unlink()
+            except OSError as e:
+                print(f"[FaissStore] ⚠️ Fehler beim Löschen von {INDEX_FILE}: {e}")
+        if MAP_FILE.exists():
+            try:
+                MAP_FILE.unlink()
+            except OSError as e:
+                print(f"[FaissStore] ⚠️ Fehler beim Löschen von {MAP_FILE}: {e}")
+        print("[FaissStore] 🧹 Index und Map gelöscht.")
+
+    def add(self, vector: list[float], filepath: str, persist_now: bool = True) -> None:
         """Fügt einen neuen Embedding-Vektor in den FAISS-Index ein.
 
         Der Vektor wird normalisiert, in den Index eingefügt und
@@ -60,15 +77,20 @@ class FaissStore:
         Args:
             vector (list[float]): Der einzufügende Embedding-Vektor.
             filepath (str): Der relative oder absolute Pfad zur zugehörigen Datei.
+            persist_now (bool): Ob der Index sofort gespeichert werden soll.
         """
         vec = np.array(vector, dtype="float32").reshape(1, -1)
         if self.index is None:
             self._init_index(vec.shape[1])
         faiss.normalize_L2(vec)
         self.index.add(vec)
-        new_id = len(self.id_map)
+
+        # WICHTIGER FIX: Die ID muss die FAISS-Index-ID sein (ntotal - 1)
+        new_id = self.index.ntotal - 1
         self.id_map[str(new_id)] = filepath
-        self._persist()
+
+        if persist_now:
+            self.persist()
 
     def search(self, vector: list[float], k: int = 5) -> list[tuple[float, str]]:
         """Sucht die `k` ähnlichsten Vektoren im FAISS-Index.
@@ -83,8 +105,13 @@ class FaissStore:
             list[tuple[float, str]]: Liste von Tupeln bestehend aus
             (Distanzwert, Dateipfad) für jeden Treffer.
         """
-        if self.index is None:
+        if self.index is None or self.index.ntotal == 0:
+            print("[FaissStore] ⚠️ Suche abgebrochen, Index ist leer.")
             return []
+
+        # Stelle sicher, dass k nicht größer ist als die Anzahl der Elemente im Index
+        k = min(k, self.index.ntotal)
+
         vec = np.array(vector, dtype="float32").reshape(1, -1)
         faiss.normalize_L2(vec)
         D, I = self.index.search(vec, k)
@@ -96,15 +123,14 @@ class FaissStore:
             filepath = self.id_map.get(fid)
             if filepath:
                 results.append((float(dist), filepath))
+            else:
+                print(f"[FaissStore] ⚠️ Index {fid} nicht in Map gefunden!")
         return results
 
-    def _persist(self) -> None:
-        """Speichert den aktuellen FAISS-Index und das ID-Mapping dauerhaft.
-
-        Der Index wird in `data/vector.index` und das Mapping in
-        `data/embeddings_map.json` geschrieben.
-        """
+    def persist(self) -> None:
+        """Speichert den aktuellen FAISS-Index und das ID-Mapping dauerhaft."""
         if self.index is not None:
             faiss.write_index(self.index, str(INDEX_FILE))
         with open(MAP_FILE, "w", encoding="utf-8") as f:
             json.dump(self.id_map, f, indent=2, ensure_ascii=False)
+        # print(f"[FaissStore] 💾 Index ({self.index.ntotal}) und Map ({len(self.id_map)}) gespeichert.")

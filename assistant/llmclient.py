@@ -31,14 +31,14 @@ def chat_system_query(
     """
     try:
         # Automatische API-Erkennung
-        client = LLMClient()
+        client = LLMClient(llm=model, temperature=0.2, max_tokens=800)
 
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
-        response = client.chat_completion(messages, llm=model, temperature=0.2, max_tokens=800)
+        response = client.chat_completion(messages)
 
         return response
     except Exception as e:

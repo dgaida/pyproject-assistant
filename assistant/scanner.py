@@ -35,6 +35,8 @@ class ProjectScanner:
         self.target = Path(target_dir).resolve()
         self.cache = DescriptionCache()
         self.faiss = FaissStore()
+        # FIX: Index vor jedem Scan löschen, um Konsistenz sicherzustellen
+        self.faiss.clear()
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.ignore_spec = self._load_gitignore()
 
@@ -109,93 +111,115 @@ class ProjectScanner:
         structure_lines = [f"{self.target.name}/"]
         metadata_items = []
 
-        for root, dirs, files in os.walk(self.target):
+        # Zuerst alle Dateien sammeln, um Baumstruktur korrekt abzubilden
+        paths_to_process = []
+        for root, dirs, files in os.walk(self.target, topdown=True):
             root_path = Path(root)
-            rel_root = root_path.relative_to(self.target)
 
-            # Nur relevante Inhalte
+            # Verzeichnisse filtern
             dirs[:] = [d for d in sorted(dirs) if not self._is_ignored(root_path / d)]
-            files = [f for f in sorted(files) if f.endswith(".py") and not self._is_ignored(root_path / f)]
 
-            # ├── oder └── für Ordner
-            if rel_root.parts:
-                depth = len(rel_root.parts) - 1
-                parent = rel_root.parent
-                parent_path = self.target / parent
-                try:
-                    siblings = sorted([p for p in parent_path.iterdir() if p.is_dir() and not self._is_ignored(p)])
-                    is_last_dir = (rel_root.name == siblings[-1].name) if siblings else False
-                except FileNotFoundError:
-                    is_last_dir = False
+            # Dateien filtern
+            for f in sorted(files):
+                if f.endswith(".py") and not self._is_ignored(root_path / f):
+                    paths_to_process.append(root_path / f)
 
-                # Einrückung aufbauen
-                indent_parts = []
-                for i, part in enumerate(rel_root.parts[:-1]):
-                    partial = self.target.joinpath(*rel_root.parts[:i + 1])
+        # DEBUG:
+        # print(f"[Scanner] Gefundene Python-Dateien: {len(paths_to_process)}")
+
+        # Baumstruktur und Metadaten erstellen
+        last_dir_in_parent = {}
+        processed_dirs = set()
+
+        for fpath in paths_to_process:
+            relpath = fpath.relative_to(self.target)
+            parts = list(relpath.parts)
+
+            indent_str = ""
+            current_path = self.target
+
+            # 1. Ordner-Struktur aufbauen (nur einmal pro Ordner)
+            for i, part in enumerate(parts[:-1]):
+                current_path = current_path / part
+                dir_rel_path = current_path.relative_to(self.target)
+
+                if dir_rel_path not in processed_dirs:
+                    # Prüfen, ob dieser Ordner der letzte in seinem Parent ist
+                    parent_path = current_path.parent
                     try:
-                        parent_dirs = sorted([p for p in partial.parent.iterdir() if p.is_dir() and not self._is_ignored(p)])
-                        if partial.name == parent_dirs[-1].name:
-                            indent_parts.append("    ")
-                        else:
-                            indent_parts.append("│   ")
-                    except FileNotFoundError:
-                        indent_parts.append("│   ")
+                        siblings = sorted([p.name for p in parent_path.iterdir() if p.is_dir() and not self._is_ignored(p)])
+                        is_last = (part == siblings[-1])
+                        last_dir_in_parent[dir_rel_path] = is_last
+                    except Exception:
+                        is_last = False
+                        last_dir_in_parent[dir_rel_path] = False
 
-                branch = "└── " if is_last_dir else "├── "
-                structure_lines.append("".join(indent_parts) + branch + rel_root.name + "/")
+                    # Einrückung für den Ordner
+                    parent_indent = ""
+                    temp_parent = dir_rel_path.parent
+                    while str(temp_parent) != ".":
+                        parent_indent = ("    " if last_dir_in_parent.get(temp_parent, False) else "│   ") + parent_indent
+                        temp_parent = temp_parent.parent
 
-            # Dateien
-            for i, fname in enumerate(files):
-                fpath = root_path / fname
-                relpath = str(fpath.relative_to(self.target))
-                connector = "└──" if i == len(files) - 1 else "├──"
+                    branch = "└── " if is_last else "├── "
+                    structure_lines.append(f"{parent_indent}{branch}{part}/")
+                    processed_dirs.add(dir_rel_path)
 
-                # Einrückung für Datei
-                indent_parts = []
-                for j, part in enumerate(rel_root.parts):
-                    partial = self.target.joinpath(*rel_root.parts[:j + 1])
-                    try:
-                        parent_dirs = sorted([p for p in partial.parent.iterdir() if p.is_dir() and not self._is_ignored(p)])
-                        if partial.name == parent_dirs[-1].name:
-                            indent_parts.append("    ")
-                        else:
-                            indent_parts.append("│   ")
-                    except FileNotFoundError:
-                        indent_parts.append("│   ")
-                subindent = "".join(indent_parts)
+            # 2. Datei-Zeile aufbauen
+            # Einrückung für die Datei
+            file_indent = ""
+            temp_parent = relpath.parent
+            while str(temp_parent) != ".":
+                file_indent = ("    " if last_dir_in_parent.get(temp_parent, False) else "│   ") + file_indent
+                temp_parent = temp_parent.parent
 
-                # Datei lesen
+            # Prüfen, ob diese Datei die letzte in ihrem Ordner ist
+            try:
+                file_siblings = sorted([f.name for f in fpath.parent.iterdir() if f.name.endswith(".py") and not self._is_ignored(f)])
+                is_last_file = (fpath.name == file_siblings[-1])
+            except Exception:
+                is_last_file = False
+
+            file_branch = "└── " if is_last_file else "├── "
+
+            # 3. Metadaten für die Datei generieren
+            relpath_str = str(relpath).replace("\\", "/")
+            try:
+                code = fpath.read_text(encoding="utf-8", errors="ignore")
+            except Exception as e:
+                print(f"[Scanner] ⚠️ Fehler beim Lesen von {relpath_str}: {e}")
+                code = ""
+
+            # Beschreibung holen
+            use_llm = self.cache.should_query_llm(relpath_str)
+            desc = self.cache.get(relpath_str)
+            if use_llm or desc is None:
+                system = "Du bist ein Python-Experte. Fasse die Aufgabe dieser Datei in einem Satz zusammen."
+                user = f"Datei: {relpath_str}\n\nCode:\n{code[:2000]}"
                 try:
-                    code = fpath.read_text(encoding="utf-8", errors="ignore")
+                    desc = chat_system_query(system, user)
                 except Exception as e:
-                    print(f"[Scanner] ⚠️ Fehler beim Lesen von {relpath}: {e}")
-                    code = ""
+                    print(f"[Scanner] ⚠️ LLM-Beschreibung fehlgeschlagen ({e})")
+                    desc = (code.splitlines()[0].strip()[:120] + "...") if code else "(leer)"
+                self.cache.touch(relpath_str, desc)
 
-                # Beschreibung holen
-                use_llm = self.cache.should_query_llm(relpath)
-                desc = self.cache.get(relpath)
-                if use_llm or desc is None:
-                    system = "Du bist ein Python-Experte. Fasse die Aufgabe dieser Datei in einem Satz zusammen."
-                    user = f"Datei: {relpath}\n\nCode:\n{code[:2000]}"
-                    try:
-                        desc = chat_system_query(system, user)
-                    except Exception as e:
-                        print(f"[Scanner] ⚠️ LLM-Beschreibung fehlgeschlagen ({e})")
-                        desc = (code.splitlines()[0].strip()[:120] + "...") if code else "(leer)"
-                    self.cache.touch(relpath, desc)
+            structure_lines.append(f"{file_indent}{file_branch} {fpath.name:<30} # {desc}")
 
-                structure_lines.append(f"{subindent}{connector} {fname:<30} # {desc}")
-
-                # Metadaten + Embeddings
-                funcs, classes = extract_defs_from_code(code)
-                metadata_items.append({"file": relpath, "functions": funcs, "classes": classes})
-                try:
-                    emb = embed_text(desc)
-                    self.faiss.add(emb, relpath)
-                except Exception as e:
-                    print(f"[Scanner] ⚠️ Fehler bei Embedding für {relpath}: {e}")
+            # 4. Metadaten + Embeddings
+            funcs, classes = extract_defs_from_code(code)
+            metadata_items.append({"file": relpath_str, "functions": funcs, "classes": classes})
+            try:
+                emb = embed_text(f"{relpath_str}: {desc}") # Embedding mit Pfad-Kontext
+                # FIX: Persist erst am Ende
+                self.faiss.add(emb, relpath_str, persist_now=False)
+            except Exception as e:
+                print(f"[Scanner] ⚠️ Fehler bei Embedding für {relpath_str}: {e}")
 
         # Speichern
+        # FIX: Persist Index/Map EINMAL am Ende des Scans
+        self.faiss.persist()
+        print(f"[Scanner] ✅ FAISS-Index mit {self.faiss.index.ntotal} Vektoren gespeichert.")
+
         write_metadata(metadata_items)
         structure_file = DATA_DIR / "structure.md"
         structure_file.write_text("\n".join(structure_lines), encoding="utf-8")

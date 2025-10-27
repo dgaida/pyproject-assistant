@@ -14,6 +14,7 @@ from pathlib import Path
 from assistant.embeddings import FaissStore
 from assistant.metadata import META_FILE
 from assistant.llmclient import embed_text
+import re
 
 
 class RAGSearcher:
@@ -39,7 +40,25 @@ class RAGSearcher:
             print(f"[RAGSearcher] ❌ Fehler beim Laden der Metadaten aus {META_FILE}: {e}")
             self.metadata = {}
 
-    def find_relevant_files(self, query: str, top_k: int = 10):
+    def _get_keywords(self, query: str) -> set[str]:
+        """Extrahiert relevante Keywords (Token) aus einer Suchanfrage."""
+        # Bereinigen: Kleinbuchstaben, nur alphanumerische Zeichen + wichtige Trennzeichen
+        q_cleaned = query.lower()
+        q_cleaned = re.sub(r"[^a-z0-9_./\\]+", " ", q_cleaned)
+
+        # Trennen bei Leerzeichen, Slashes, Punkten
+        tokens = set(re.split(r"[\s./\\]+", q_cleaned))
+
+        # Rauschwörter filtern
+        noise_words = {
+            "schreibe", "inhalt", "für", "die", "das", "package", "ein", "eine",
+            "und", "oder", "mit", "von", "zu", "py", "datei", "file", "function",
+            "klasse", "class", "methode", "method", "in", "der", "relativer", "pfad"
+        }
+        keywords = {t for t in tokens if t and t not in noise_words}
+        return keywords
+
+    def find_relevant_files(self, query: str, top_k: int = 5):
         """Findet relevante Dateien für eine Nutzeranfrage.
 
         Args:
@@ -50,19 +69,34 @@ class RAGSearcher:
             list[str]: Liste relativer Dateipfade, die relevant erscheinen.
         """
         results = set()
-        q = query.lower()
+        q_lower = query.lower()
+        q_keywords = self._get_keywords(query)
+        print(f"[RAGSearcher] 🔑 Keywords: {q_keywords}")
 
         # --- 1. Keyword-basierte Suche ---
         try:
             for item in self.metadata:
-                fname = item.get("file", "").lower()
-                if not fname.endswith(".py"):
+                filepath = item.get("file", "")
+                if not filepath.endswith(".py"):
                     continue
-                functions = item.get("functions", [])
-                classes = item.get("classes", [])
-                # Prüfen, ob Dateiname oder Funktion/Klasse im Query vorkommt
-                if fname in q or any(fn.lower() in q for fn in functions + classes):
-                    results.add(item["file"])
+
+                # A. Direkter Pfad-Match (wenn Nutzer Pfad angibt)
+                if filepath in q_lower:
+                    results.add(filepath)
+                    continue
+
+                # B. Token-basierte Suche
+                # Erstelle Tokens aus Pfad, Funktionen und Klassen
+                path_tokens = set(re.split(r"[\s./\\]+", filepath.lower().replace(".py", "")))
+                functions = {f.lower() for f in item.get("functions", [])}
+                classes = {c.lower() for c in item.get("classes", [])}
+
+                all_tokens = path_tokens.union(functions).union(classes)
+
+                # Prüfe auf Schnittmenge
+                if q_keywords.intersection(all_tokens):
+                    results.add(filepath)
+
             print(f"[RAGSearcher] 🔎 Keyword-Suche ergab {len(results)} Treffer")
         except Exception as e:
             print(f"[RAGSearcher] ❌ Fehler bei Keyword-Suche: {e}")
@@ -72,8 +106,6 @@ class RAGSearcher:
             emb = embed_text(query)
             vector_hits = self.faiss.search(emb, k=top_k)
             print(f"[RAGSearcher] 🔎 Vektor-Suche ergab {len(vector_hits)} Treffer")
-            for hit in vector_hits:
-                print(f"[RAGSearcher]    → {hit}")
             for score, fname in vector_hits:
                 results.add(fname)
                 print(f"[RAGSearcher]    → {fname} (score={score:.4f})")
