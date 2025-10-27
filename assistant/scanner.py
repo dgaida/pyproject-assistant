@@ -13,7 +13,25 @@ DATA_DIR = Path("data")
 
 
 class ProjectScanner:
-    def __init__(self, target_dir: str):
+    """Rekursiver Projekt-Scanner für Python-Packages.
+
+    Durchsucht ein Zielverzeichnis rekursiv nach `.py`-Dateien, analysiert deren
+    Inhalte, generiert Kurzbeschreibungen über ein LLM, extrahiert Funktionen und
+    Klassen, und schreibt die komplette Projektstruktur in eine Markdown-Datei.
+
+    Zusätzlich werden Metadaten in JSON gespeichert und Embeddings in einer
+    FAISS-Datenbank abgelegt.
+    """
+
+    def __init__(self, target_dir: str) -> None:
+        """Initialisiert den Projekt-Scanner.
+
+        Lädt den Cache, initialisiert FAISS, erstellt das `data`-Verzeichnis
+        und lädt optional eine `.gitignore`-Spezifikation.
+
+        Args:
+            target_dir (str): Pfad zum Zielverzeichnis (Python-Projekt oder Package).
+        """
         self.target = Path(target_dir).resolve()
         self.cache = DescriptionCache()
         self.faiss = FaissStore()
@@ -23,7 +41,15 @@ class ProjectScanner:
     # --------------------------------------------------------
     # .gitignore mit pathspec
     # --------------------------------------------------------
-    def _load_gitignore(self):
+    def _load_gitignore(self) -> "PathSpec | None":
+        """Lädt eine `.gitignore`-Datei und erstellt eine PathSpec-Matching-Regel.
+
+        Gibt `None` zurück, falls keine `.gitignore` vorhanden oder lesbar ist.
+
+        Returns:
+            PathSpec | None: Eine `PathSpec`-Instanz zur Filterung ignorierter Pfade
+            oder `None`, falls keine Datei geladen werden konnte.
+        """
         gitignore_path = self.target / ".gitignore"
         if not gitignore_path.exists():
             print("[Scanner] ℹ️ Keine .gitignore-Datei gefunden.")
@@ -38,6 +64,15 @@ class ProjectScanner:
             return None
 
     def _is_ignored(self, path: Path) -> bool:
+        """Prüft, ob ein gegebener Pfad laut `.gitignore` ignoriert werden soll.
+
+        Args:
+            path (Path): Absoluter Pfad zu einer Datei oder einem Ordner.
+
+        Returns:
+            bool: `True`, wenn der Pfad laut `.gitignore` ignoriert werden soll,
+            sonst `False`.
+        """
         """Prüft, ob Datei oder Ordner laut .gitignore ignoriert werden soll."""
         if not self.ignore_spec:
             return False
@@ -54,7 +89,22 @@ class ProjectScanner:
     # --------------------------------------------------------
     # Hauptlogik
     # --------------------------------------------------------
-    def scan(self):
+    def scan(self) -> None:
+        """Führt den vollständigen Scan des Zielprojekts durch.
+
+        Rekursiv werden alle Python-Dateien im Zielordner durchsucht, Kurzbeschreibungen
+        generiert, Funktionen und Klassen extrahiert und die Ergebnisse als:
+
+        - Markdown-Struktur (`data/structure.md`)
+        - Metadaten (`data/meta.json`)
+        - Embeddings in FAISS (`data/vector.index`)
+
+        gespeichert.
+
+        Raises:
+            Exception: Wenn beim Zugriff auf Dateien oder beim Schreiben der Ergebnisse
+            ein schwerwiegender Fehler auftritt.
+        """
         print(f"[Scanner] 🚀 Starte Scan von {self.target}")
         structure_lines = [f"{self.target.name}/"]
         metadata_items = []

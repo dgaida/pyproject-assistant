@@ -32,9 +32,19 @@ Wichtig:
 
 
 def save_prompt_to_md(prompt: str, folder: str = "logs/prompts") -> Path:
-    """
-    Speichert den vollständigen Prompt als Markdown-Datei.
-    Der Dateiname enthält einen Zeitstempel.
+    """Speichert den vollständigen Prompt als Markdown-Datei mit Zeitstempel.
+
+    Erstellt das angegebene Zielverzeichnis (falls nicht vorhanden) und legt dort
+    eine Markdown-Datei mit dem vollständigen Prompt-Inhalt ab. Der Dateiname
+    enthält einen eindeutigen Zeitstempel.
+
+    Args:
+        prompt (str): Der vollständige Text des Prompts, der gespeichert werden soll.
+        folder (str, optional): Zielverzeichnis für die gespeicherte Datei.
+            Standardmäßig `"logs/prompts"`.
+
+    Returns:
+        Path: Der vollständige Pfad zur erstellten Markdown-Datei.
     """
     Path(folder).mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -45,7 +55,27 @@ def save_prompt_to_md(prompt: str, folder: str = "logs/prompts") -> Path:
     return filename
 
 
-def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = "."):
+def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".") -> None:
+    """Startet die Gradio-GUI für den Projekt-Assistenten mit RAG-Funktionalität.
+
+    Die Anwendung bietet:
+      - Einen Chatbereich zur Kommunikation mit dem LLM
+      - Anzeige der Projektstruktur (Markdown)
+      - Anzeige von vorgeschlagenen Dateiänderungen (Diffs)
+      - Möglichkeit, generierte Änderungen in die Dateien zu übernehmen
+
+    Args:
+        host (str, optional): Hostname oder IP-Adresse, unter der die GUI erreichbar ist.
+            Standardmäßig `"127.0.0.1"`.
+        port (int, optional): Portnummer, auf dem der Gradio-Server läuft.
+            Standardmäßig `7860`.
+        project_root (str, optional): Pfad zum Projekt, das analysiert und bearbeitet werden soll.
+            Standardmäßig `"."`.
+
+    Raises:
+        Exception: Wenn beim Laden der Projektstruktur oder bei der GUI-Initialisierung
+        ein schwerwiegender Fehler auftritt.
+    """
     project_root = Path(project_root)
     rag = RAGSearcher()
     structure_md = Path("data/structure.md").read_text(encoding="utf-8") if Path("data/structure.md").exists() else ""
