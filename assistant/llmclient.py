@@ -10,22 +10,9 @@ Konfigurationshinweise:
   verfügbar sein (z. B. `nomic-embed-text`).
 """
 
-import os
-from dotenv import load_dotenv
-from groq import Groq
-import requests
+from llm_client import LLMClient
 from ollama import embed
 
-# --- API Keys / Umgebungsvariablen ---
-load_dotenv("secrets.env")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise RuntimeError("❌ Fehlender GROQ_API_KEY in secrets.env")
-
-# --- Clients ---
-client = Groq(api_key=GROQ_API_KEY)
-
-# --- Funktionen ---
 
 def chat_system_query(
     system_prompt: str,
@@ -43,19 +30,19 @@ def chat_system_query(
         str: Generierte Antwort des LLM.
     """
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=800,
-            temperature=0.2,
-        )
-        content = response.choices[0].message.content.strip()
-        return content
+        # Automatische API-Erkennung
+        client = LLMClient()
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        response = client.chat_completion(messages, llm=model, temperature=0.2, max_tokens=800)
+
+        return response
     except Exception as e:
-        print(f"[llm_client] ❌ Fehler bei GROQ Chat Query: {e}")
+        print(f"[llm_client] ❌ Fehler bei LLMClient Chat Query: {e}")
         raise
 
 

@@ -6,3 +6,4 @@ numpy
 astor
 rich
 # optional: install a persistent vector DB instead of FAISS if desired
+git+https://github.com/dgaida/llm_client.git
