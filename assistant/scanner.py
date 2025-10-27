@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 from pathspec import PathSpec
 from .cache import DescriptionCache
-from .llm_client import chat_system_query, embed_text
+from .llmclient import chat_system_query, embed_text
 from .embeddings import FaissStore
 from .metadata import extract_defs_from_code, write_metadata
 

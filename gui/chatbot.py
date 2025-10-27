@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 from assistant.rag import RAGSearcher
-from assistant.llm_client import chat_system_query
+from assistant.llmclient import chat_system_query
 from utils.file_ops import read_file, write_file_with_backup, unified_diff
 
 

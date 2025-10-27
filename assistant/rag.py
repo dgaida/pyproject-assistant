@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from assistant.embeddings import FaissStore
 from assistant.metadata import META_FILE
+from assistant.llmclient import embed_text
 
 
 class RAGSearcher:
@@ -68,7 +69,6 @@ class RAGSearcher:
 
         # --- 2. Embedding-basierte Suche ---
         try:
-            from assistant.llm_client import embed_text
             emb = embed_text(query)
             vector_hits = self.faiss.search(emb, k=top_k)
             print(f"[RAGSearcher] 🔎 Vektor-Suche ergab {len(vector_hits)} Treffer")
