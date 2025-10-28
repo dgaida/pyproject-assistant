@@ -7,11 +7,14 @@ import json
 from pathlib import Path
 import os
 from datetime import datetime
+import logging
 
 from assistant.rag import RAGSearcher
 from assistant.llmclient import chat_system_query
 from utils.file_ops import read_file, write_file_with_backup, unified_diff
+from utils.logging_config import get_logger
 
+logger = get_logger(__name__)
 
 # FIX: Verbesserter System-Prompt, der Modifikationen statt Überschreiben anweist
 SYSTEM_PROMPT = """Du bist ein hilfreicher Python-Programmierassistent.
@@ -58,9 +61,9 @@ def save_prompt_to_md(prompt: str, folder: str = "logs/prompts") -> Path:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(f"# LLM Prompt ({timestamp})\n\n")
             f.write(prompt)
-        print(f"[Chatbot] 💾 Prompt gespeichert: {filename}")
+        logger.info(f"Prompt gespeichert: {filename}")
     except Exception as e:
-        print(f"[Chatbot] ⚠️ Fehler beim Speichern des Prompts: {e}")
+        logger.error(f"Fehler beim Speichern des Prompts: {e}")
     return filename
 
 
@@ -126,13 +129,13 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
             if not user_prompt:
                 return "{}", [], gr.update(choices=[], value=None)
 
-            print(f"[Chatbot] 💬 Neue Anfrage: {user_prompt}")
+            logger.info(f"Neue Anfrage: {user_prompt}")
 
             # Relevante Dateien für Kontext
             files = rag.find_relevant_files(user_prompt)
             context_parts = []
             if not files:
-                print("[Chatbot] ⚠️ RAG fand keine relevanten Dateien.")
+                logger.warning("RAG fand keine relevanten Dateien.")
 
             for f in files:
                 p = Path(project_root) / f
@@ -141,10 +144,10 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
                         text = p.read_text(encoding="utf-8", errors="ignore")
                         context_parts.append(f"\n### Datei: {f}\n```python\n{text}\n```")
                     except Exception as e:
-                        print(f"[Chatbot] ⚠️ Fehler beim Lesen der Kontext-Datei {f}: {e}")
+                        logger.error(f"Fehler beim Lesen der Kontext-Datei {f}: {e}")
                         context_parts.append(f"\n### Datei: {f}\n(Konnte nicht gelesen werden: {e})")
                 else:
-                    print(f"[Chatbot] ⚠️ RAG-Treffer {f} existiert nicht am Pfad {p}")
+                    logger.warning(f"RAG-Treffer {f} existiert nicht am Pfad {p}")
 
             user_message = (
                 "## Projektstruktur\n"
@@ -159,9 +162,9 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
             save_prompt_to_md(user_message)
 
             try:
-                print("[Chatbot] 🤖 Sende Anfrage an LLM...")
+                logger.info("Sende Anfrage an LLM...")
                 raw = chat_system_query(SYSTEM_PROMPT, user_message)
-                print("[Chatbot] 🤖 LLM-Antwort (Roh):", raw)
+                logger.info("LLM-Antwort (Roh):", raw)
 
                 # Versuche JSON zu parsen
                 changes = json.loads(raw)
@@ -169,7 +172,7 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
                     raise ValueError("JSON ist kein Array")
 
             except Exception as e:
-                print(f"[Chatbot] ❌ Fehler bei LLM- oder JSON-Parsing: {e}")
+                logger.error(f"Fehler bei LLM- oder JSON-Parsing: {e}")
                 error_json = [{"error": f"Fehler bei LLM- oder JSON-Parsing: {e}", "raw_response": raw}]
                 return error_json, [], gr.update(choices=[], value=None)
 
@@ -192,7 +195,7 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
 
         def on_apply(filename, changes):
             if not filename:
-                return gr.update(value="Keine Datei ausgewählt ❌", variant="stop")
+                return gr.update(value="Keine Datei ausgewählt ❌")
 
             for c in changes:
                 if c.get("file") == filename:
@@ -202,13 +205,13 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
 
                     ok = write_file_with_backup(target_path, c["new_content"])
                     if ok:
-                        print(f"[Chatbot] ✅ Änderung für {filename} übernommen.")
-                        return gr.update(value=f"Änderung für {filename} übernommen ✅", variant="success")
+                        logger.info(f"Änderung für {filename} übernommen.")
+                        return gr.update(value=f"Änderung für {filename} übernommen ✅")
                     else:
-                        print(f"[Chatbot] ❌ Fehler beim Schreiben von {filename}.")
-                        return gr.update(value=f"Fehler beim Schreiben von {filename} ❌", variant="stop")
+                        logger.error(f"Fehler beim Schreiben von {filename}.")
+                        return gr.update(value=f"Fehler beim Schreiben von {filename} ❌")
 
-            return gr.update(value="Datei nicht gefunden ❌", variant="stop")
+            return gr.update(value="Datei nicht gefunden ❌")
 
         send_btn.click(
             on_send,
@@ -226,5 +229,5 @@ def launch_gui(host: str = "127.0.0.1", port: int = 7860, project_root: str = ".
             outputs=[status],
         )
 
-    print(f"[Chatbot] 🚀 Starte Gradio GUI auf http://{host}:{port}")
+    logger.info(f"Starte Gradio GUI auf http://{host}:{port}")
     demo.launch(server_name=host, server_port=port, inbrowser=True)

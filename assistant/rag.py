@@ -75,6 +75,7 @@ class RAGSearcher:
 
         # --- 1. Keyword-basierte Suche ---
         try:
+            keyword_results = []
             for item in self.metadata:
                 filepath = item.get("file", "")
                 if not filepath.endswith(".py"):
@@ -82,7 +83,7 @@ class RAGSearcher:
 
                 # A. Direkter Pfad-Match (wenn Nutzer Pfad angibt)
                 if filepath in q_lower:
-                    results.add(filepath)
+                    keyword_results.append((filepath, 1.0))
                     continue
 
                 # B. Token-basierte Suche
@@ -94,10 +95,15 @@ class RAGSearcher:
                 all_tokens = path_tokens.union(functions).union(classes)
 
                 # Prüfe auf Schnittmenge
-                if q_keywords.intersection(all_tokens):
-                    results.add(filepath)
+                score = len(q_keywords.intersection(all_tokens)) / len(q_keywords)
+                if score > 0:
+                    keyword_results.append((filepath, score))
 
-            print(f"[RAGSearcher] 🔎 Keyword-Suche ergab {len(results)} Treffer")
+            # Sortiere Ergebnisse nach Score und wähle die besten 5
+            keyword_results.sort(key=lambda x: x[1], reverse=True)
+            keyword_results = keyword_results[:5]
+            results.update([x[0] for x in keyword_results])
+            print(f"[RAGSearcher] 🔎 Keyword-Suche ergab {len(keyword_results)} Treffer")
         except Exception as e:
             print(f"[RAGSearcher] ❌ Fehler bei Keyword-Suche: {e}")
 

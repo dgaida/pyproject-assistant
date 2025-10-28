@@ -31,7 +31,7 @@ def chat_system_query(
     """
     try:
         # Automatische API-Erkennung
-        client = LLMClient(llm=model, temperature=0.2, max_tokens=800)
+        client = LLMClient(llm=model, temperature=0.2, max_tokens=2500)
 
         messages = [
             {"role": "system", "content": system_prompt},
